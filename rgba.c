@@ -24,6 +24,9 @@
 #include "g2d_driver.h"
 #include "rgba.h"
 
+#define BYTES_PER_PIXEL(rgba_format) (((rgba_format) == VDP_RGBA_FORMAT_A8) ? 1 : 4)
+#define G2DFORMAT_FROM_VDPFORMAT(rgba_format) (((rgba_format) == VDP_RGBA_FORMAT_A8) ? G2D_FMT_8BPP_MONO : G2D_FMT_ARGB_AYUV8888)
+
 static void dirty_add_rect(VdpRect *dirty, const VdpRect *rect)
 {
 	dirty->x0 = min(dirty->x0, rect->x0);
@@ -44,8 +47,10 @@ VdpStatus rgba_create(rgba_surface_t *rgba,
                       uint32_t height,
                       VdpRGBAFormat format)
 {
-	if (format != VDP_RGBA_FORMAT_B8G8R8A8 && format != VDP_RGBA_FORMAT_R8G8B8A8)
+	if (format != VDP_RGBA_FORMAT_B8G8R8A8 && format != VDP_RGBA_FORMAT_R8G8B8A8 && format != VDP_RGBA_FORMAT_A8) {
+		fprintf(stderr, "error: rgba_create format %d unknown\n", (int) format);
 		return VDP_STATUS_INVALID_RGBA_FORMAT;
+	}
 
 	if (width < 1 || width > 8192 || height < 1 || height > 8192)
 		return VDP_STATUS_INVALID_SIZE;
@@ -57,7 +62,7 @@ VdpStatus rgba_create(rgba_surface_t *rgba,
 
 	if (device->osd_enabled)
 	{
-		rgba->data = ve_malloc(width * height * 4);
+		rgba->data = ve_malloc(width * height * BYTES_PER_PIXEL(rgba->format));
 		if (!rgba->data)
 			return VDP_STATUS_RESOURCES;
 
@@ -92,17 +97,17 @@ VdpStatus rgba_put_bits_native(rgba_surface_t *rgba,
 	if ((rgba->flags & RGBA_FLAG_NEEDS_CLEAR) && !dirty_in_rect(&rgba->dirty, &d_rect))
 		rgba_clear(rgba);
 
-	if (0 == d_rect.x0 && rgba->width == d_rect.x1 && source_pitches[0] == d_rect.x1) {
+	if (0 == d_rect.x0 && rgba->width == d_rect.x1 && source_pitches[0] == d_rect.x1) { // FIXME is that correct? isn't "pitches" in Byte ?
 		// full width
 		const int bytes_to_copy =
-			(d_rect.x1 - d_rect.x0) * (d_rect.y1 - d_rect.y0) * 4;
-		memcpy(rgba->data + d_rect.y0 * rgba->width * 4,
+			(d_rect.x1 - d_rect.x0) * (d_rect.y1 - d_rect.y0) * BYTES_PER_PIXEL(rgba->format);
+		memcpy(rgba->data + d_rect.y0 * rgba->width * BYTES_PER_PIXEL(rgba->format),
 			   source_data[0], bytes_to_copy);
 	} else {
-		const unsigned int bytes_in_line = (d_rect.x1-d_rect.x0) * 4;
+		const unsigned int bytes_in_line = (d_rect.x1-d_rect.x0) * BYTES_PER_PIXEL(rgba->format);
 		unsigned int y;
 		for (y = d_rect.y0; y < d_rect.y1; y ++) {
-			memcpy(rgba->data + (y * rgba->width + d_rect.x0) * 4,
+			memcpy(rgba->data + (y * rgba->width + d_rect.x0) * BYTES_PER_PIXEL(rgba->format),
 				   source_data[0] + (y - d_rect.y0) * source_pitches[0],
 				   bytes_in_line);
 		}
@@ -245,7 +250,7 @@ void rgba_fill(rgba_surface_t *dest, const VdpRect *dest_rect, uint32_t color)
 		args.dst_image.addr[0] = ve_virt2phys(dest->data) + 0x40000000;
 		args.dst_image.w = dest->width;
 		args.dst_image.h = dest->height;
-		args.dst_image.format = G2D_FMT_ARGB_AYUV8888;
+		args.dst_image.format = G2DFORMAT_FROM_VDPFORMAT(dest->format);
 		args.dst_image.pixel_seq = G2D_SEQ_NORMAL;
 		if (dest_rect)
 		{
@@ -281,7 +286,7 @@ void rgba_blit(rgba_surface_t *dest, const VdpRect *dest_rect, rgba_surface_t *s
 		args.src_image.addr[0] = ve_virt2phys(src->data) + 0x40000000;
 		args.src_image.w = src->width;
 		args.src_image.h = src->height;
-		args.src_image.format = G2D_FMT_ARGB_AYUV8888;
+		args.src_image.format = G2DFORMAT_FROM_VDPFORMAT(src->format);
 		args.src_image.pixel_seq = G2D_SEQ_NORMAL;
 		args.src_rect.x = src_rect->x0;
 		args.src_rect.y = src_rect->y0;
@@ -290,7 +295,7 @@ void rgba_blit(rgba_surface_t *dest, const VdpRect *dest_rect, rgba_surface_t *s
 		args.dst_image.addr[0] = ve_virt2phys(dest->data) + 0x40000000;
 		args.dst_image.w = dest->width;
 		args.dst_image.h = dest->height;
-		args.dst_image.format = G2D_FMT_ARGB_AYUV8888;
+		args.dst_image.format = G2DFORMAT_FROM_VDPFORMAT(dest->format);
 		args.dst_image.pixel_seq = G2D_SEQ_NORMAL;
 		args.dst_x = dest_rect->x0;
 		args.dst_y = dest_rect->y0;
@@ -305,8 +310,8 @@ void rgba_flush(rgba_surface_t *rgba)
 {
 	if (rgba->flags & RGBA_FLAG_NEEDS_FLUSH)
 	{
-		ve_flush_cache(rgba->data + rgba->dirty.y0 * rgba->width * 4,
-				(rgba->dirty.y1 - rgba->dirty.y0) * rgba->width * 4);
+		ve_flush_cache(rgba->data + rgba->dirty.y0 * rgba->width * BYTES_PER_PIXEL(rgba->format),
+				(rgba->dirty.y1 - rgba->dirty.y0) * rgba->width * BYTES_PER_PIXEL(rgba->format));
 		rgba->flags &= ~RGBA_FLAG_NEEDS_FLUSH;
 	}
 }
