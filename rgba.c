@@ -97,7 +97,7 @@ VdpStatus rgba_put_bits_native(rgba_surface_t *rgba,
 	if ((rgba->flags & RGBA_FLAG_NEEDS_CLEAR) && !dirty_in_rect(&rgba->dirty, &d_rect))
 		rgba_clear(rgba);
 
-	if (0 == d_rect.x0 && rgba->width == d_rect.x1 && source_pitches[0] == d_rect.x1) { // FIXME is that correct? isn't "pitches" in Byte ?
+	if (0 == d_rect.x0 && rgba->width == d_rect.x1 && source_pitches[0] == d_rect.x1 * BYTES_PER_PIXEL(rgba->format)) {
 		// full width
 		const int bytes_to_copy =
 			(d_rect.x1 - d_rect.x0) * (d_rect.y1 - d_rect.y0) * BYTES_PER_PIXEL(rgba->format);
